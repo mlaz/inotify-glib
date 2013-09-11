@@ -1,7 +1,9 @@
 /*
- * inotify-lib.c - backend for really simple inotify example
+ * inotify-glib.c - backend for really simple inotify example
  *
- * Robert Love <rml@novell.com>
+ * Based on https://www.kernel.org/pub/linux/kernel/people/rml/inotify/glib/
+ * By Robert Love <rml@novell.com>
+ * Changes by Miguel Azevedo <migullazev@gmail.com>
  */
 
 #include <sys/types.h>
@@ -13,17 +15,17 @@
 #include "inotify-glib.h"
 
 /*
- * inotify_open - open the inotify device and return a fresh GIOChannel
+ * inf_open - open the inotify device and return a fresh GIOChannel
  * or NULL on error.
  */
 GIOChannel *
 inf_open (void)
 {
-  int fd;
-  GIOChannel *gio;
+  int fd = 0;
+  GIOChannel *gio = NULL;
   GError *err = NULL;
 
-  fd = inotify_init ();
+  fd = inotify_init1 (IN_NONBLOCK);
 
   if (fd < 0)
     {
@@ -32,16 +34,17 @@ inf_open (void)
 
   gio = g_io_channel_unix_new (fd);
 
-  if (!gio) {
-    g_warning ("Couldn't open GIOChannel %s\n", err->message);
-    g_error_free (err);
-  }
+  if (!gio)
+    {
+      g_warning ("Couldn't open GIOChannel %s\n", err->message);
+      g_error_free (err);
+    }
 
   return gio;
 }
 
 /*
- * inotify_close - close the GIOChannel
+ * inf_close - close the GIOChannel
  */
 void
 inf_close (GIOChannel *gio)
@@ -56,28 +59,45 @@ inf_close (GIOChannel *gio)
 }
 
 /*
- * inotify_add_watch - Add an inotify watch on the object "name" to the
+ * inf_add_watch - Add an inotify watch on the object "name" to the
  * open inotify instance associated with "gio".  The user may do this any
  * number of times, even on the same device instance.
  */
 int
-inf_add_watch (GIOChannel *gio, const char *name)
+inf_add_watch (GIOChannel *gio, const char *name, uint32_t mask)
 {
-  int in_fd, wd, ret;
+  int in_fd, wd;
 
   in_fd = g_io_channel_unix_get_fd (gio);
-  wd = inotify_add_watch (in_fd, name, IN_ALL_EVENTS);
-  if (wd < 0) {
-    perror ("inotify_add_watch error!\n");
-    return -1;
-  }
+  wd = inotify_add_watch (in_fd, name, mask);
+  if (wd < 0)
+    {
+      perror ("inotify_add_watch error!\n");
+      return -1;
+    }
 
-  //should we do this here?
-  /* if (close (wd)) */
-  /*   perror ("close wd error!\n"); */
+  return wd;
+}
+
+/*
+ * inf_rm_watch - A guiven inotify watch is removed.
+ */
+int
+inf_rm_watch (GIOChannel *gio, int wd)
+{
+  int in_fd, ret;
+
+  in_fd = g_io_channel_unix_get_fd (gio);
+  ret = inotify_rm_watch (in_fd, wd);
+  if (ret < 0)
+    {
+      perror ("inotify_rm_watch error!\n");
+      return ret;
+    }
 
   return ret;
 }
+
 
 /* inotify lets us slurp a lot of events at once.  we go with a nice big 32k */
 #define INOTIFY_BUF	32768
@@ -94,37 +114,38 @@ __inotify_handle_cb (GIOChannel *gio, GIOCondition condition, gpointer data)
   char buf[INOTIFY_BUF];
   InotifyCb f = data;
   GError* err = NULL;
-  gsize len;
+  gsize len = 0;
   int i = 0;
 
   /* read in as many pending events as we can */
   g_io_channel_read_chars (gio, buf, INOTIFY_BUF, &len, &err);
-  if (err != NULL) {
-    fprintf (stderr, "Error reading the inotify fd: %d\n", err->message);
-    // g_warning ("Error reading the inotify fd: %d\n", err);
-    return FALSE;
-  }
+  if (err != NULL)
+    {
+      g_warning ("Error reading the inotify fd: %s\n", err->message);
+      return FALSE;
+    }
 
   /* reconstruct each event and send to the user's callback */
-  while (i < len) {
-    const char *name = "The watch";
-    struct inotify_event *event;
+  while (i < len)
+    {
+      const char *name = "The watch";
+      struct inotify_event *event;
 
-    event = (struct inotify_event *) &buf[i];
-    if (event->len)
-      name = &buf[i] + sizeof (struct inotify_event);
+      event = (struct inotify_event *) &buf[i];
+      if (event->len)
+        name = &buf[i] + sizeof (struct inotify_event);
 
-    if (f (name, event->wd, event->mask, event->cookie) == FALSE)
-      return FALSE;
+      if (f (name, event->wd, event->mask, event->cookie) == FALSE)
+        return FALSE;
 
-    i += sizeof (struct inotify_event) + event->len;
-  }
+      i += sizeof (struct inotify_event) + event->len;
+    }
 
   return TRUE;
 }
 
 /*
- * inotify_callback - associate a user InotifyCb callback with the given
+ * inf_callback - associate a user InotifyCb callback with the given
  * GIOChannel.  This is normally done but once.
  */
 void

@@ -1,7 +1,9 @@
 /*
  * inotify.c - frontend for really simple inotify example
  *
- * Robert Love	<rml@novell.com>
+ * Based on https://www.kernel.org/pub/linux/kernel/people/rml/inotify/glib/
+ * By Robert Love <rml@novell.com>
+ * Changes by Miguel Azevedo <migullazev@gmail.com>
  */
 
 #include <glib.h>
@@ -19,6 +21,7 @@ static gboolean
 my_cb (const char *name, int wd, unsigned int event, unsigned int cookie)
 {
   const char *type = "file";
+  //GFileTest test;
 
   if (event & IN_ISDIR)
     type = "dir";
@@ -46,7 +49,17 @@ my_cb (const char *name, int wd, unsigned int event, unsigned int cookie)
   if (event & IN_CREATE)
     g_print ("wd=%d: %s (%s) was created\n", wd, name, type);
   if (event & IN_DELETE_SELF)
-    g_print ("wd=%d: The watch was deleted!", wd);
+    {
+      g_print ("wd=%d: The watch was deleted!", wd);
+      /* check if the file stll exists, if yes restart the watch. */
+      /* g_file_test(wname ,test); */
+      /* if (test == G_FILE_TEST_EXISTS) */
+      /* { */
+      /*   g_print ("wd=%d: Restarting watch\n", wd); */
+      /* } */
+      /* else */
+      /*   g_print ("wd=%d: The watch was deleted!", wd); */
+    }
   if (event & IN_UNMOUNT)
     g_print ("wd=%d: %s was unmounted\n", wd, name);
   if (event & IN_Q_OVERFLOW)
@@ -64,21 +77,23 @@ main (int argc, char *argv[])
   GIOChannel *gio;
   int i;
 
-  if (argc < 2) {
-    g_warning ("Usage: %s [directories or files ...]\n", argv[0]);
-    return -1;
-  }
+  if (argc < 2)
+    {
+      g_warning ("Usage: %s [directories or files ...]\n", argv[0]);
+      return -1;
+    }
 
   gio = inf_open ();
   if (!gio)
     return -1;
 
-  for (i = 1; i < argc; i++) {
-    int wd;
+  for (i = 1; i < argc; i++)
+    {
+      int wd;
 
-    g_print ("Adding watch on %s\n", argv[i]);
-    wd = inf_add_watch (gio, argv[i]);
-  }
+      g_print ("Adding watch on %s, wd=%d\n", argv[i], wd);
+      wd = inf_add_watch (gio, argv[i], IN_ALL_EVENTS);
+    }
 
   inf_callback (gio, my_cb);
 
